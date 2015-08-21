@@ -4,7 +4,9 @@ PROG=	makefs
 
 CFLAGS+=-I${.CURDIR}
 
-SRCS=	cd9660.c ffs.c \
+SRCS=	cd9660.c \
+	ffs.c \
+	getid.c \
 	makefs.c \
 	mtree.c \
 	walk.c
@@ -18,9 +20,8 @@ WARNS?=	2
 CFLAGS+=-DHAVE_STRUCT_STAT_ST_FLAGS=1
 CFLAGS+=-DHAVE_STRUCT_STAT_ST_GEN=1
 
-.PATH: ${.CURDIR}/../../contrib/mtree
-CFLAGS+=-I${.CURDIR}/../../contrib/mtree
-SRCS+=	getid.c misc.c spec.c
+.PATH: ${.CURDIR}/../../contrib/libmtree
+CFLAGS+=-I${.CURDIR}/../../contrib/libmtree
 
 .PATH: ${.CURDIR}/../../contrib/mknod
 CFLAGS+=-I${.CURDIR}/../../contrib/mknod
@@ -30,6 +31,6 @@ SRCS+=	pack_dev.c
 SRCS+=	ffs_tables.c
 
 CFLAGS+=	-I${.CURDIR}/../../lib/libnetbsd
-LIBADD=		netbsd util sbuf
+LIBADD=		mtree netbsd util sbuf
 
 .include <bsd.prog.mk>

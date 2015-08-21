@@ -50,8 +50,8 @@ __FBSDID("$FreeBSD$");
 #include <time.h>
 #include <unistd.h>
 
+#include "getid.h"
 #include "makefs.h"
-#include "mtree.h"
 
 /*
  * list of supported file systems and dispatch functions
@@ -191,7 +191,7 @@ main(int argc, char *argv[])
 			fsoptions.maxsize =
 			    strsuftoll("maximum size", optarg, 1LL, LLONG_MAX);
 			break;
-			
+
 		case 'o':
 		{
 			char *p;
@@ -344,7 +344,7 @@ static fstype_t *
 get_fstype(const char *type)
 {
 	int i;
-	
+
 	for (i = 0; fstypes[i].type != NULL; i++)
 		if (strcmp(fstypes[i].type, type) == 0)
 			return (&fstypes[i]);

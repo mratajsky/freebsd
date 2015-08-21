@@ -48,7 +48,7 @@
  *	a component of the tree; contains a filename, a pointer to
  *	fsinode, optional symlink name, and tree pointers
  *
- * fsinode - 
+ * fsinode -
  *	equivalent to an inode, containing target file system inode number,
  *	refcount (nlink), and stat buffer
  *
@@ -150,6 +150,8 @@ typedef struct {
 
 
 void		apply_specfile(const char *, const char *, fsnode *, int);
+fsnode *	create_fsnode(const char *, const char *, const char *,
+		    struct stat *);
 void		dump_fsnodes(fsnode *);
 const char *	inode_type(mode_t);
 fsnode *	read_mtree(const char *, fsnode *);
