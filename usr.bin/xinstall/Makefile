@@ -6,12 +6,12 @@ PROGNAME=	install
 SRCS=		xinstall.c getid.c
 MAN=		install.1
 
-.PATH:		${.CURDIR}/../../contrib/mtree
+.PATH:		${.CURDIR}/../../contrib/libmtree
 .PATH:		${.CURDIR}/../../lib/libmd
-CFLAGS+=	-I${.CURDIR}/../../contrib/mtree
+CFLAGS+=	-I${.CURDIR}/../../contrib/libmtree/libmtree
 CFLAGS+=	-I${.CURDIR}/../../lib/libnetbsd
 CFLAGS+=	-I${.CURDIR}/../../lib/libmd
 
-LIBADD=	md
+LIBADD=		md mtree
 
 .include <bsd.prog.mk>

@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2015 Michal Ratajsky <michal@FreeBSD.org>
  * Copyright (c) 2012, 2013 SRI International
  * Copyright (c) 1987, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -56,6 +57,8 @@ __FBSDID("$FreeBSD$");
 #include <grp.h>
 #include <libgen.h>
 #include <md5.h>
+#include <mtree.h>
+#include <mtree_file.h>
 #include <paths.h>
 #include <pwd.h>
 #include <ripemd.h>
@@ -69,9 +72,8 @@ __FBSDID("$FreeBSD$");
 #include <string.h>
 #include <sysexits.h>
 #include <unistd.h>
-#include <vis.h>
 
-#include "mtree.h"
+#include "getid.h"
 
 #define MAX_CMP_SIZE	(16 * 1024 * 1024)
 
@@ -111,6 +113,7 @@ static int dobackup, docompare, dodir, dolink, dopreserve, dostrip, dounpriv,
     safecopy, verbose;
 static int haveopt_f, haveopt_g, haveopt_m, haveopt_o;
 static mode_t mode = S_IRWXU | S_IRGRP | S_IXGRP | S_IROTH | S_IXOTH;
+static struct mtree_spec *spec;
 static FILE *metafp;
 static const char *group, *owner;
 static const char *suffix = BACKUP_SUFFIX;
@@ -131,7 +134,7 @@ static void	do_symlink(const char *, const char *, const struct stat *);
 static void	makelink(const char *, const char *, const struct stat *);
 static void	install(const char *, const char *, u_long, u_int);
 static void	install_dir(char *);
-static void	metadata_log(const char *, const char *, struct timeval *,
+static void	metadata_log(const char *, mtree_entry_type, struct timeval *,
 		    const char *, const char *, off_t);
 static int	parseid(const char *, id_t *);
 static void	strip(const char *);
@@ -324,6 +327,12 @@ main(int argc, char *argv[])
 	if (metafile != NULL) {
 		if ((metafp = fopen(metafile, "a")) == NULL)
 			warn("open %s", metafile);
+		else {
+			spec = mtree_spec_create();
+			if (spec != NULL)
+				mtree_spec_set_write_format(spec,
+				   MTREE_FORMAT_2_0);
+		}
 	} else
 		digesttype = DIGEST_NONE;
 
@@ -358,7 +367,7 @@ main(int argc, char *argv[])
 	/* can't do file1 file2 directory/file */
 	if (argc != 2) {
 		if (no_target)
-			warnx("target directory `%s' does not exist", 
+			warnx("target directory `%s' does not exist",
 			    argv[argc - 1]);
 		else
 			warnx("target `%s' is not a directory",
@@ -375,7 +384,7 @@ main(int argc, char *argv[])
 		}
 		if (to_sb.st_dev == from_sb.st_dev &&
 		    to_sb.st_ino == from_sb.st_ino)
-			errx(EX_USAGE, 
+			errx(EX_USAGE,
 			    "%s and %s are the same file", *argv, to_name);
 	}
 	install(*argv, to_name, fset, iflags);
@@ -632,7 +641,7 @@ makelink(const char *from_name, const char *to_name,
 				if (!haveopt_f)
 					fflags = NULL;
 				dres = digest_file(from_name);
-				metadata_log(to_name, "file", NULL, NULL,
+				metadata_log(to_name, MTREE_ENTRY_FILE, NULL, NULL,
 				    dres, to_sb.st_size);
 				free(dres);
 				mode = omode;
@@ -651,7 +660,7 @@ makelink(const char *from_name, const char *to_name,
 			err(EX_OSERR, "%s: realpath", from_name);
 		do_symlink(src, to_name, target_sb);
 		/* XXX: src may point outside of destdir */
-		metadata_log(to_name, "link", NULL, src, NULL, 0);
+		metadata_log(to_name, MTREE_ENTRY_LINK, NULL, src, NULL, 0);
 		return;
 	}
 
@@ -662,7 +671,8 @@ makelink(const char *from_name, const char *to_name,
 			/* this is already a relative link */
 			do_symlink(from_name, to_name, target_sb);
 			/* XXX: from_name may point outside of destdir. */
-			metadata_log(to_name, "link", NULL, from_name, NULL, 0);
+			metadata_log(to_name, MTREE_ENTRY_LINK, NULL, from_name,
+			    NULL, 0);
 			return;
 		}
 
@@ -701,7 +711,7 @@ makelink(const char *from_name, const char *to_name,
 
 		do_symlink(lnk, to_name, target_sb);
 		/* XXX: Link may point outside of destdir. */
-		metadata_log(to_name, "link", NULL, lnk, NULL, 0);
+		metadata_log(to_name, MTREE_ENTRY_LINK, NULL, lnk, NULL, 0);
 		return;
 	}
 
@@ -711,7 +721,7 @@ makelink(const char *from_name, const char *to_name,
 	 */
 	do_symlink(from_name, to_name, target_sb);
 	/* XXX: from_name may point outside of destdir. */
-	metadata_log(to_name, "link", NULL, from_name, NULL, 0);
+	metadata_log(to_name, MTREE_ENTRY_LINK, NULL, from_name, NULL, 0);
 }
 
 /*
@@ -948,7 +958,7 @@ install(const char *from_name, const char *to_name, u_long fset, u_int flags)
 			(void)fchflags(to_fd, to_sb.st_flags & ~NOCHANGEBITS);
 	}
 
-	if (!dounpriv & 
+	if (!dounpriv &
 	    (gid != (gid_t)-1 && gid != to_sb.st_gid) ||
 	    (uid != (uid_t)-1 && uid != to_sb.st_uid))
 		if (fchown(to_fd, uid, gid) == -1) {
@@ -995,7 +1005,8 @@ install(const char *from_name, const char *to_name, u_long fset, u_int flags)
 	if (!devnull)
 		(void)close(from_fd);
 
-	metadata_log(to_name, "file", tvb, NULL, digestresult, to_sb.st_size);
+	metadata_log(to_name, MTREE_ENTRY_FILE, tvb, NULL, digestresult,
+	    to_sb.st_size);
 	free(digestresult);
 }
 
@@ -1297,7 +1308,7 @@ again:
 		if (chmod(path, mode))
 			warn("chmod %o %s", mode, path);
 	}
-	metadata_log(path, "dir", NULL, NULL, NULL, 0);
+	metadata_log(path, MTREE_ENTRY_DIR, NULL, NULL, NULL, 0);
 }
 
 /*
@@ -1307,78 +1318,105 @@ again:
  *	or to allow integrity checks to be performed.
  */
 static void
-metadata_log(const char *path, const char *type, struct timeval *tv,
-	const char *slink, const char *digestresult, off_t size)
+metadata_log(const char *path, mtree_entry_type type, struct timeval *tv,
+    const char *slink, const char *dres, off_t size)
 {
-	static const char extra[] = { ' ', '\t', '\n', '\\', '#', '\0' };
-	const char *p;
-	char *buf;
-	size_t destlen;
 	struct flock metalog_lock;
+	struct mtree_entry *entry;
+	struct mtree_timespec ts;
+	const char *p;
+	size_t destlen;
 
-	if (!metafp)	
+	if (metafp == NULL || spec == NULL)
 		return;
-	/* Buffer for strsvis(3). */
-	buf = (char *)malloc(4 * strlen(path) + 1);
-	if (buf == NULL) {
-		warnx("%s", strerror(ENOMEM));
+
+	/* Remove destdir. */
+	p = path;
+	if (destdir != NULL) {
+		destlen = strlen(destdir);
+		if (strncmp(p, destdir, destlen) == 0 &&
+		    (p[destlen] == '/' || p[destlen] == '\0'))
+			p += destlen;
+	}
+	while (*p != '\0' && *p == '/')
+		p++;
+
+	entry = mtree_entry_create(p);
+	if (entry == NULL) {
+		warn("can't create mtree entry for `%s'", path);
 		return;
 	}
+	/*
+	 * Set keywords.
+	 */
+	mtree_entry_set_type(entry, type);
+	mtree_entry_set_mode(entry, mode);
+	if (type == MTREE_ENTRY_FILE)
+		mtree_entry_set_size(entry, size);
+
+	if (slink != NULL)
+		mtree_entry_set_link(entry, slink);
+	if (tv != NULL && dopreserve) {
+		ts.tv_sec  = tv->tv_sec;
+		ts.tv_nsec = tv->tv_usec * 1000;
+		mtree_entry_set_time(entry, &ts);
+	}
+	if (tags != NULL)
+		mtree_entry_set_tags(entry, tags);
+	if (owner != NULL)
+		mtree_entry_set_uname(entry, owner);
+	if (group != NULL)
+		mtree_entry_set_gname(entry, group);
+	if (fflags != NULL)
+		mtree_entry_set_flags(entry, fflags);
+	if (dres != NULL) {
+		switch (digesttype) {
+		case DIGEST_MD5:
+			mtree_entry_set_md5digest(entry, dres,
+			    MTREE_KEYWORD_MD5);
+			break;
+		case DIGEST_RIPEMD160:
+			mtree_entry_set_rmd160digest(entry, dres,
+			    MTREE_KEYWORD_RMD160);
+			break;
+		case DIGEST_SHA1:
+			mtree_entry_set_sha1digest(entry, dres,
+			    MTREE_KEYWORD_SHA1);
+			break;
+		case DIGEST_SHA256:
+			mtree_entry_set_sha256digest(entry, dres,
+			    MTREE_KEYWORD_SHA256);
+			break;
+		case DIGEST_SHA512:
+			mtree_entry_set_sha512digest(entry, dres,
+			    MTREE_KEYWORD_SHA512);
+			break;
+		default:
+			break;
+		}
+	}
+
+	mtree_spec_set_entries(spec, entry);
 
 	/* Lock log file. */
 	metalog_lock.l_start = 0;
 	metalog_lock.l_len = 0;
 	metalog_lock.l_whence = SEEK_SET;
 	metalog_lock.l_type = F_WRLCK;
-	if (fcntl(fileno(metafp), F_SETLKW, &metalog_lock) == -1) {
+	if (fcntl(fileno(metafp), F_SETLKW, &metalog_lock) != -1) {
+		if (mtree_spec_write_file(spec, metafp) == 0)
+			fflush(metafp);
+		else
+			warn("can't write metadata log %s", metafile);
+
+		/* Unlock log file. */
+		metalog_lock.l_type = F_UNLCK;
+		if (fcntl(fileno(metafp), F_SETLKW, &metalog_lock) == -1)
+			warn("can't unlock %s", metafile);
+	} else
 		warn("can't lock %s", metafile);
-		free(buf);
-		return;
-	}
 
-	/* Remove destdir. */
-	p = path;
-	if (destdir) {
-		destlen = strlen(destdir);
-		if (strncmp(p, destdir, destlen) == 0 &&
-		    (p[destlen] == '/' || p[destlen] == '\0'))
-			p += destlen;
-	}
-	while (*p && *p == '/')
-		p++;
-	strsvis(buf, p, VIS_OCTAL, extra);
-	p = buf;
-	/* Print details. */
-	fprintf(metafp, ".%s%s type=%s", *p ? "/" : "", p, type);
-	if (owner)
-		fprintf(metafp, " uname=%s", owner);
-	if (group)
-		fprintf(metafp, " gname=%s", group);
-	fprintf(metafp, " mode=%#o", mode);
-	if (slink) {
-		strsvis(buf, slink, VIS_CSTYLE, extra);	/* encode link */
-		fprintf(metafp, " link=%s", buf);
-	}
-	if (*type == 'f') /* type=file */
-		fprintf(metafp, " size=%lld", (long long)size);
-	if (tv != NULL && dopreserve)
-		fprintf(metafp, " time=%lld.%ld",
-			(long long)tv[1].tv_sec, (long)tv[1].tv_usec);
-	if (digestresult && digest)
-		fprintf(metafp, " %s=%s", digest, digestresult);
-	if (fflags)
-		fprintf(metafp, " flags=%s", fflags);
-	if (tags)
-		fprintf(metafp, " tags=%s", tags);
-	fputc('\n', metafp);
-	/* Flush line. */
-	fflush(metafp);
-
-	/* Unlock log file. */
-	metalog_lock.l_type = F_UNLCK;
-	if (fcntl(fileno(metafp), F_SETLKW, &metalog_lock) == -1)
-		warn("can't unlock %s", metafile);
-	free(buf);
+	mtree_entry_free(mtree_spec_take_entries(spec));
 }
 
 /*
